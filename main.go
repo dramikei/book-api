@@ -1,7 +1,7 @@
 package main
 
 import (
-	"BOOK-API/book"
+	"github.com/dramikei/book-api/book"
 	"database/sql"
 	"fmt"
 	"net/http"
