@@ -57,7 +57,7 @@ func (this *Env) getBook(c echo.Context) (err error) {
 
 func (this *Env) addBook(c echo.Context) (err error) {
 	book := new(book.Book)
-	if err != nil {
+	if err := c.Bind(book); err != nil {
 		return handleError(c, err)
 	}
 	sql := "INSERT INTO BOOKS(name, author, qty) VALUES(?, ?, ?)"
