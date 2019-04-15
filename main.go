@@ -1,161 +1,115 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"net/http"
 	"strconv"
 
-	"github.com/dramikei/book-api/book"
-
+	"github.com/jinzhu/gorm"
+	_ "github.com/jinzhu/gorm/dialects/mysql"
 	"github.com/labstack/echo"
-
-	_ "github.com/go-sql-driver/mysql"
 )
 
+type Book struct {
+	gorm.Model
+	Name   string `gorm:"type:varchar(255)"`
+	Author string `gorm:"type:varchar(255)"`
+	Qty    uint32 `gorm:"type:INT"`
+}
+
 type Env struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
 func (this *Env) setupDB() {
-	db, err := sql.Open("mysql", "root:raghav@tcp(127.0.0.1:3306)/Library")
-
+	db, err := gorm.Open("mysql", "root:raghav@tcp(127.0.0.1:3306)/Library?parseTime=True")
 	this.db = db
+	db.AutoMigrate(&Book{})
 
 	if err != nil {
 		fmt.Println(err.Error())
 	} else {
 		fmt.Println("Connected to Database")
 	}
-	err = this.db.Ping()
-	if err != nil {
-		fmt.Println(err.Error())
+}
+
+func (this *Env) getBooks(c echo.Context) (err error) {
+	var books []Book
+	if err := this.db.Find(&books).Error; err != nil {
+		return handle404Error(c, err)
 	}
+	// for i := range books {
+	// 	books[i].ID = uint(i + 1)
+	// }
+	return c.JSON(http.StatusOK, &books)
+	//BUG: returns the array with all IDs being 0
 }
 
 func (this *Env) getBook(c echo.Context) (err error) {
 	idInt, err := strconv.Atoi(c.Param("id"))
-	id := uint32(idInt)
+	id := uint(idInt)
 	if err != nil {
-		return handleError(c, err)
+		return handleInternalError(c, err)
 	}
-	var name string
-	var author string
-	var qty uint32
-
-	get := "SELECT id, name, author, qty FROM BOOKS WHERE id = ?"
-
-	err = this.db.QueryRow(get, id).Scan(&id, &name, &author, &qty)
-	if err != nil {
-		return handleError(c, err)
+	var response Book
+	if err := this.db.First(&response, id).Error; err != nil {
+		return handle404Error(c, err)
 	}
-
-	response := book.Book{ID: id, Name: name, Author: author, Qty: qty}
+	response.ID = id //BUG: Id needs to be set explicitly, else returns with ID 0
 	return c.JSON(http.StatusOK, response)
 
 }
 
 func (this *Env) addBook(c echo.Context) (err error) {
-	book := new(book.Book)
+	book := new(Book)
 	if err := c.Bind(book); err != nil {
-		return handleError(c, err)
+		return handleInternalError(c, err)
 	}
-	sql := "INSERT INTO BOOKS(name, author, qty) VALUES(?, ?, ?)"
-	stmt, err := this.db.Prepare(sql)
-
-	if err != nil {
-		return handleError(c, err)
-	}
-	defer stmt.Close()
-	result, err := stmt.Exec(book.Name, book.Author, book.Qty)
-	if err != nil {
-		return handleError(c, err)
-	}
-
-	id, err := result.LastInsertId()
-
-	if err != nil {
-		return handleError(c, err)
-	}
-	book.ID = uint32(id)
+	this.db.Create(&book)
 	return c.JSON(http.StatusOK, book)
 }
 
 func (this *Env) editBook(c echo.Context) (err error) {
-	book := new(book.Book)
+	var book Book
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		return handleError(c, err)
-	}
-	err1 := c.Bind(book)
-	if err1 != nil {
-		return handleError(c, err1)
-	}
-	book.ID = uint32(id)
-
-	update := "UPDATE BOOKS SET name=?, author=?, qty=? WHERE id=?"
-
-	stmt, err := this.db.Prepare(update)
-
-	if err != nil {
-		return handleError(c, err)
+		return handleInternalError(c, err)
 	}
 
-	defer stmt.Close()
-	result, err := stmt.Exec(book.Name, book.Author, book.Qty, id)
-	if err != nil {
-		return handleError(c, err)
+	if err := this.db.Where("id = ?", id).First(&book).Error; err != nil {
+		return handle404Error(c, err)
 	}
-	fmt.Println(result.RowsAffected())
+
+	if err := c.Bind(&book); err != nil {
+		fmt.Println(book)
+		return handleInternalError(c, err)
+	}
+	book.ID = uint(id)
+	this.db.Save(&book)
 	return c.JSON(http.StatusOK, book)
 }
 
 func (this *Env) deleteBook(c echo.Context) (err error) {
-	id := c.Param("id")
-
-	delete := "DELETE from BOOKS where id=?"
-
-	stmt, err := this.db.Prepare(delete)
+	idInt, err := strconv.Atoi(c.Param("id"))
+	id := uint(idInt)
 	if err != nil {
-		return handleError(c, err)
+		return handleInternalError(c, err)
 	}
-	result, err := stmt.Exec(id)
-	if err != nil {
-		return handleError(c, err)
+	var book Book
+	if err := this.db.Unscoped().Where("id=?", id).Delete(&book).Error; err != nil {
+		return handle404Error(c, err)
 	}
-	fmt.Println(result.RowsAffected())
-	stmt.Close()
-	this.resetAutoIncrement(c)
 	return c.String(http.StatusOK, "Deleted.")
 }
 
-func (this *Env) resetAutoIncrement(c echo.Context) (err error) {
-	maxID := "SELECT MAX(`id`) FROM `Books`"
-	var number int
-	err = this.db.QueryRow(maxID).Scan(&number)
-	if err != nil {
-		return handleError(c, err)
-	}
-	num := number + 1
-	alterID := fmt.Sprintf("ALTER TABLE Books AUTO_INCREMENT= %d", num)
-	fmt.Println(alterID, number)
-	stmt, err := this.db.Prepare(alterID)
-	if err != nil {
-		return handleError(c, err)
-	}
-	defer stmt.Close()
-	fmt.Println(err)
-	result, err := stmt.Exec()
-	fmt.Println(result.RowsAffected())
-	if err != nil {
-		return handleError(c, err)
-	}
-	return nil
-}
-
-func handleError(c echo.Context, e error) error {
+func handleInternalError(c echo.Context, e error) error {
 	fmt.Println(e)
 	return c.String(http.StatusInternalServerError, e.Error())
+}
+
+func handle404Error(c echo.Context, e error) error {
+	fmt.Println(e)
+	return c.String(http.StatusNotFound, e.Error())
 }
 
 func main() {
@@ -166,6 +120,7 @@ func main() {
 	defer env.db.Close()
 	e := echo.New()
 
+	e.GET("/books/", env.getBooks)
 	e.GET("/books/:id", env.getBook)
 	e.POST("/books/", env.addBook)
 	e.PUT("/books/:id", env.editBook)
