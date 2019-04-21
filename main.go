@@ -38,11 +38,7 @@ func (this *Env) getBooks(c echo.Context) (err error) {
 	if err := this.db.Find(&books).Error; err != nil {
 		return handle404Error(c, err)
 	}
-	// for i := range books {
-	// 	books[i].ID = uint(i + 1)
-	// }
 	return c.JSON(http.StatusOK, &books)
-	//BUG: returns the array with all IDs being 0
 }
 
 func (this *Env) getBook(c echo.Context) (err error) {
@@ -55,7 +51,6 @@ func (this *Env) getBook(c echo.Context) (err error) {
 	if err := this.db.First(&response, id).Error; err != nil {
 		return handle404Error(c, err)
 	}
-	response.ID = id //BUG: Id needs to be set explicitly, else returns with ID 0
 	return c.JSON(http.StatusOK, response)
 
 }
@@ -67,6 +62,14 @@ func (this *Env) addBook(c echo.Context) (err error) {
 	}
 	this.db.Create(&book)
 	return c.JSON(http.StatusOK, book)
+}
+
+func (this *Env) queryBook(c echo.Context) (err error) {
+	var books []Book
+	name := c.QueryParam("name")
+	authorName := c.QueryParam("author")
+	this.db.Where("name = ? OR author = ?", name, authorName).Find(&books)
+	return c.JSON(http.StatusOK, &books)
 }
 
 func (this *Env) editBook(c echo.Context) (err error) {
@@ -84,7 +87,6 @@ func (this *Env) editBook(c echo.Context) (err error) {
 		fmt.Println(book)
 		return handleInternalError(c, err)
 	}
-	book.ID = uint(id)
 	this.db.Save(&book)
 	return c.JSON(http.StatusOK, book)
 }
@@ -122,6 +124,7 @@ func main() {
 
 	e.GET("/books/", env.getBooks)
 	e.GET("/books/:id", env.getBook)
+	e.GET("/books/", env.queryBook)
 	e.POST("/books/", env.addBook)
 	e.PUT("/books/:id", env.editBook)
 	e.DELETE("/books/:id", env.deleteBook)
