@@ -34,10 +34,12 @@ func (this *Env) setupDB() {
 }
 
 func (this *Env) getBooks(c echo.Context) (err error) {
-	var books []Book
+	println("getBooks Called")
+	books := make([]Book, 0)
 	if err := this.db.Find(&books).Error; err != nil {
 		return handle404Error(c, err)
 	}
+	fmt.Println("Books: ", books)
 	return c.JSON(http.StatusOK, &books)
 }
 
@@ -60,7 +62,9 @@ func (this *Env) addBook(c echo.Context) (err error) {
 	if err := c.Bind(book); err != nil {
 		return handleInternalError(c, err)
 	}
-	this.db.Create(&book)
+	if err := this.db.Create(&book).Error; err != nil {
+		return handleInternalError(c, err)
+	}
 	return c.JSON(http.StatusOK, book)
 }
 
@@ -101,7 +105,11 @@ func (this *Env) deleteBook(c echo.Context) (err error) {
 	if err := this.db.Unscoped().Where("id=?", id).Delete(&book).Error; err != nil {
 		return handle404Error(c, err)
 	}
-	return c.String(http.StatusOK, "Deleted.")
+	if this.db.RowsAffected == 0 {
+		return c.String(http.StatusNotFound, "record not found")
+	} else {
+		return c.String(http.StatusOK, "Deleted.")
+	}
 }
 
 func handleInternalError(c echo.Context, e error) error {
@@ -124,7 +132,7 @@ func main() {
 
 	e.GET("/books/", env.getBooks)
 	e.GET("/books/:id", env.getBook)
-	e.GET("/books/", env.queryBook)
+	e.GET("/books/q/", env.queryBook)
 	e.POST("/books/", env.addBook)
 	e.PUT("/books/:id", env.editBook)
 	e.DELETE("/books/:id", env.deleteBook)
